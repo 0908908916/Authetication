@@ -1,0 +1,211 @@
+Authentication(認證) and Cryptography(密碼學)  比如說可以註冊登入帳密認證服務這樣 認證
+做出一個註冊的表格 讓使用者填資料  把資料安全存在資料庫 事後使用者可以做登入 登入時跟資料庫資料做確認 來認證
+
+密碼學導入: 凱薩密碼 有 A-Z 假設移動三步後 A就會對到D  D對到G  XYZ 就會分別對到 ABC 幫她做平行移動之後 可以幫訊息做加密的動作 例: I LOVE YOU   I對L L對到N 接下來幫所有東西作加密。 移動幾步是解題凱薩密碼關鍵 前面三步就是一個鑰匙 如果有這個鑰匙就可以幫文件作加密跟解密的動作 
+
+再來 
+
+Username and Password
+
+To create an authentication system, we just need a database storing username and password. When the user logins check if the input password matches the password in database. if yes. then render the page.
+
+
+
+用戶名和密碼
+
+要創建一個身份驗證系統，我們只需要一個存儲用戶名和密碼的數據庫。用戶登錄時檢查輸入的密碼與數據庫中的密碼是否匹配。如果是。然後渲染頁面。
+
+記得一個重點  要連結 ejs 檔案 記得要 npm install ejs 把它弄到  packge.json 裡面 不然會有問題
+
+
+運用 Hash Function 來做加密 加密在儲存到 database 
+
+1. 他是不可逆得 或 現今科技難以做解密動作 
+
+2. 無論 input 長度是什麼 他都會產生出長度一樣的 hash value 例如設16位數   123 -> 16位數
+假如輸入 6988779 -> 一樣 16位數
+
+3. 再輸入小小的改變 會造成 在hash value很大的改變 
+
+4.同樣的 input 會給你同樣的 result. 
+
+業界有人寫好這個函數 就不太用憑空做出一個 可以套用他的函數 
+
+
+講解 Salting 
+
+1.So... every time when we hash our password, we include some random value.
+Therefore, from the users` point, even if two of them have the same password, but their encrypted
+password in server `s database will look different
+
+2.Most of the time, salt is not private. it `s just like user `s username or email...
+Why? Since hash function is not invertible, so they cannot find out the original password.
+
+1.所以...每次我們對密碼進行哈希處理時，我們都會包含一些隨機值。
+因此，從用戶的角度來看，即使兩個人的密碼相同，但他們的密碼是加密的
+服務器數據庫中的密碼看起來會有所不同
+
+2.大多數時候，鹽並不是私人的。它就像用戶的用戶名或電子郵件......
+為什麼？由於哈希函數不可逆，因此他們無法找出原始密碼。
+
+再來到 npm 這個網站 搜尋 bcrypt 安裝下來 讓你可以運用上面加密方式 合二為一
+網址為: https://www.npmjs.com/package/bcrypt
+
+
+
+app.js 程式碼 
+
+
+require("dotenv").config(); // 使用  dotenv 連結 在左邊檔案創建一個 .env 在檔案裏面加入  SECRET=THISISMYTOPSECRET 再把檔案關閉
+const express = require("express");
+const app = express();
+const mongoose = require("mongoose");
+const cookieParser = require("cookie-parser");
+const session = require("express-session"); // 導入 session
+const flash = require("connect-flash"); // 導入 Flash
+const bodyParser = require("body-parser"); // 導入 導入 body-parser 連結 運用登入帳密
+const User = require("./models/user"); // 把這個 user.js 導入進來 這樣就能夠用他的 js
+const bcrypt = require("bcrypt"); // 導入密碼加密 讓駭客不好破解
+const saltRounds = 10; // 數字越大所花時間越久 幫密碼加密所需要花的時間 2 的 10 次方 1024 個 Rounds 執行幾次的意思
+// 加密執行的動作在以下的 /signup
+
+//////////////////////////////
+
+app.set("view engine", "ejs");
+
+// 跟 cookie 連結 第二個動作
+app.use(cookieParser(process.env.SECRET)); //  使用 process 的方法
+
+// 他的 session  middle were 設定很特別
+app.use(
+  session({
+    secret: process.env.SECRET, // 這這樣就可以使用我們設定的 SECRET 在.env 的東西 dotenv 連結
+    resave: false, // 記得要設定 包在一個物件裡面 裡面三個設定完可做使用
+    saveUninitialized: false,
+  })
+);
+
+// 他的 Flash middle were 執行這個 flash 之後就可以使用了
+app.use(flash());
+app.use(bodyParser.urlencoded({ extended: true })); // 解析程式碼
+
+mongoose
+  .connect("mongodb://127.0.0.1:27017/test", {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => {
+    console.log("connected to mongoDB.");
+  })
+  .catch((e) => {
+    console.log(e);
+  });
+
+app.get("/", (req, res) => {
+  res.send("home page");
+});
+
+///////////////////////////
+
+// 以下是整個登入的邏輯
+// Login route 用來做登入的 連結到 login.ejs
+app.get("/login", (req, res) => {
+  res.render("login");
+});
+
+// 在來使用這個 login 來找到他的 user 登入出現 My secret is - I love panda. 這個 ejs 的設定就為成功登入
+// 正常來說不會這樣寫那麼明顯  登入錯誤 通常程式碼就只會有一個對或不對 2擇1這樣 避免駭客破解 較安全
+// 為了避免法律問題 要把 password 加密 以免駭客入侵 之後 cmd 就不會顯示真正的密碼
+app.post("/login", async (req, res, next) => {
+  let { username, password } = req.body;
+  try {
+    // 登入成功會跳訊息 失敗一樣會有訊息
+    let foundUser = await User.findOne({ username });
+    if (foundUser && password == foundUser.password) {
+      res.render("secret");
+    } else {
+      res.send("Username or password not correct.");
+    }
+  } catch (e) {
+    next(e);
+  }
+});
+
+//////////////////////////////////
+
+// 使用者帳密登入認證 連結 signup 的 form
+app.get("/signup", (req, res) => {
+  res.render("signup"); // 記得要 npm i ejs 把它弄到安裝  packge.json 裡面 不然會有問題
+});
+
+// 在設定一個 route 測試登入帳密 可以獲取輸入的帳密 console.log(req.body); CMD 顯示 { username: 'wilson@fake.com', password: '123456' }
+app.post("/signup", (req, res, next) => {
+  let { username, password } = req.body; // 獲取輸入帳密的資料 要把它存進 database 裡面 所以要做一個 models 資料夾  裡面新增 user.js 檔
+  // 幫牠的密碼加密
+  bcrypt.genSalt(saltRounds, (err, salt, next) => {
+    if (err) {
+      next(err); // 如果有錯誤就會顯示錯誤
+    }
+    console.log(salt);
+    // 第一格是使用者輸入的密碼(password)
+    bcrypt.hash(password, salt, (err, hash, next) => {
+      if (err) {
+        next(err);
+      }
+      console.log(hash);
+      // 來存我的東西 password 要來存我的 hash
+      let newUser = new User({ username, password: hash }); // 用一個變數 然後導入 js 的檔案 user.js 做使用
+      // 接下來要把它放進去我的 database 裡面 用 save 存進去
+      try {
+        newUser
+          .save()
+          .then(() => {
+            res.send("Data has been saved.");
+          })
+          .catch((e) => {
+            res.send("Error!!");
+          });
+      } catch (err) {
+        next(err);
+      }
+    });
+  });
+});
+
+// 以上好就可以測試看看 要確認是否有確實存在 database 就到 cmd 的 mongo 裡面看
+// 查找指令為  db.users.find() user 後面要加一個 s 可看到裡面 { "_id" : ObjectId("64b7d3f6b8fa70dcdf8f60e4"), "username" : "wilson@fake.com", "password" : "123456", "__v" : 0 } 有這個資料
+// 然後再做兩個 ejs 放進 views 裡面 套用 app.js
+
+app.get("/*", (req, res) => {
+  res.status(404).send("404 Page not found.");
+});
+
+// 處理 error handler 一般的錯誤
+app.use((err, req, res, next) => {
+  console.log(err); // 如果有錯誤就把它顯示在 console.log 裡面 跟以上做關聯
+  res.status(500).send("Something is broken. We will fix it soon."); // 代表系統錯誤
+});
+
+app.listen(3000, () => {
+  console.log("Server running on port 3000.");
+});
+
+// 網址為 http://localhost:3000/
+
+
+/////////////////////
+//////////////////////
+///////////////////////
+
+加密完後 上跟下 循序漸進 跑 cmd  進入到 mongo
+再讓他進入 指令 打  db.users.find() 看資料庫裏面得資料  再來把資料刪除 指令為 
+刪除指令 db.users.deleteMany({}) 把她刪除 讓裡面沒有使用者 在檢查尋找一次  db.users.find()
+看是不是空的 
+再來用 cmd 跑 node app.js
+再來到  http://localhost:3000/signup 的這個網站
+登入帳號密碼 然後第二個頁面選不要儲存
+再來看 cmd 裡面就會出現 salt 跟 hash 的加密碼 因為有 console 所以看的到 
+再回來用到 mongo 裡面 一樣  db.users.find() 來看看 就會看到密碼是有加密的密碼
+
+
+
